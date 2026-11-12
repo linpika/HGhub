@@ -1,10 +1,10 @@
 WidgetMetadata = {
   id: "hghub.library",
   title: "HGhub",
-  description: "在播放器里浏览 HGhub 已使用的公开游客目录，并在起播时解析播放地址。不含登录、收藏或评论。",
+  description: "在播放器里浏览 HGhub 已使用的公开游客目录，并在起播时解析播放地址。海报使用个人封面服务的 HTTPS 地址。不含登录、收藏或评论。",
   author: "HGhub",
   site: "https://huangguoai.com",
-  version: "0.2.1",
+  version: "0.2.2",
   requiredVersion: "0.0.1",
   detailCacheDuration: 60,
   modules: [
@@ -106,6 +106,7 @@ var HGhubWidget = (function () {
   var USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
   var PAGE_SIZE = 20;
+  var COVER_ORIGIN = "https://img-2c812d1bf79fee03e88d.linpika.com";
   var CATEGORIES = {
     "ai-duanju": true,
     "ai-manju": true,
@@ -263,6 +264,7 @@ var HGhubWidget = (function () {
       mediaType: episodes > 1 ? "tv" : "movie",
     };
     applyText(item, card);
+    item.posterPath = COVER_ORIGIN + "/v1/v/" + id + ".png";
     return item;
   }
 
@@ -279,6 +281,7 @@ var HGhubWidget = (function () {
       mediaType: episodes > 1 ? "tv" : "movie",
     };
     applyText(item, card);
+    item.posterPath = COVER_ORIGIN + "/v1/v/" + id + ".png";
     return item;
   }
 
@@ -359,6 +362,7 @@ var HGhubWidget = (function () {
     if (typeof data.score === "number") item.rating = String(data.score);
     if (typeof data.created_at === "string" && data.created_at) item.releaseDate = data.created_at;
     if (tagsOf(data.tags).length) item.genreTitle = tagsOf(data.tags).join(" / ");
+    item.posterPath = COVER_ORIGIN + "/v1/v/" + id + ".png";
     return item;
   }
 

@@ -1,0 +1,4 @@
+# 挂进已经接收 img-2c812d1bf79fee03e88d.linpika.com 的 Caddy 站点。
+# 不要新加监听。80 和 8443 已由 Caddy 使用，443 已由 xray 使用。
+# 容器只发布 127.0.0.1:8787。
+reverse_proxy 127.0.0.1:8787

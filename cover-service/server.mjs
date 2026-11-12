@@ -2,13 +2,15 @@
 // License: PolyForm Noncommercial 1.0.0
 // https://polyformproject.org/licenses/noncommercial/1.0.0
 //
-// 只提供已批准的演示图。HGhub 密文封面适配器未接入，这里没有解密密钥。
+// 只处理游客接口已经返回、且主机在白名单内的封面。失败不换地址，也不记录封面查询串。
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
-import { demoPng } from "./png.mjs";
+import { decodeCover, loadFormatMaterial } from "./decode.mjs";
+import { verifyJpeg } from "./image.mjs";
+import { coverUrl, fetchCoverBytes, resolveCover } from "./source.mjs";
 
-const DEMO = Object.freeze({ id: "demo", bytes: demoPng(), type: "image/png" });
 const RATE_MAX_KEYS = 1024;
 
 export function createCoverApp(options = {}) {
@@ -16,17 +18,18 @@ export function createCoverApp(options = {}) {
   if (typeof secret !== "string" || secret.length < 16) {
     throw new Error("COVER_SIGNING_SECRET must be provided at runtime");
   }
+  const material = options.material;
+  if (!material) throw new Error("media format material missing");
   const now = options.now || (() => Date.now());
   const maxTtlSec = options.maxTtlSec || 120;
-  const cacheTtlMs = options.cacheTtlMs || 60_000;
-  const cacheMax = options.cacheMax || 8;
+  const cacheTtlMs = options.cacheTtlMs || 600_000;
+  const cacheMax = options.cacheMax || 32;
   const rateMax = options.rateMax || 30;
   const rateWindowMs = options.rateWindowMs || 60_000;
   const rateMaxKeys = options.rateMaxKeys || RATE_MAX_KEYS;
   const trustedProxies = new Set((options.trustedProxies || []).map(normalizeIp).filter(Boolean));
-  const outbound = options.outbound || (() => {
-    throw new Error("outbound fetch is not enabled");
-  });
+  const resolve = options.resolveCover || resolveCover;
+  const fetchBytes = options.fetchCover || fetchCoverBytes;
   const cache = new Map();
   const rates = new Map();
   const loads = new Map();
@@ -47,7 +50,7 @@ export function createCoverApp(options = {}) {
   }
 
   function signature(id, exp) {
-    return createHmac("sha256", secret).update(`GET\n/v1/${id}.png\n${exp}`).digest();
+    return createHmac("sha256", secret).update(`GET\n/v1/v/${id}.png\n${exp}`).digest();
   }
 
   function authorized(id, expRaw, sigRaw, t) {
@@ -72,15 +75,9 @@ export function createCoverApp(options = {}) {
     return hit;
   }
 
-  function store(id, src, t) {
+  function store(id, body, t) {
     if (cache.size >= cacheMax && !cache.has(id)) cache.delete(cache.keys().next().value);
-    cache.set(id, { body: src.bytes, type: src.type, exp: t + cacheTtlMs });
-  }
-
-  function approved(id) {
-    if (id !== DEMO.id) return null;
-    loads.set(id, (loads.get(id) || 0) + 1);
-    return DEMO;
+    cache.set(id, { body, type: "image/jpeg", exp: t + cacheTtlMs });
   }
 
   function clientIp(peer, headers) {
@@ -88,8 +85,27 @@ export function createCoverApp(options = {}) {
     if (!trustedProxies.has(normalized)) return normalized;
     const forwarded = headers["x-forwarded-for"];
     if (typeof forwarded !== "string" || forwarded.includes(",")) return normalized;
-    const candidate = normalizeIp(forwarded.trim());
-    return candidate || normalized;
+    return normalizeIp(forwarded.trim()) || normalized;
+  }
+
+  async function imageFor(id, t) {
+    const hit = fromCache(id, t);
+    if (hit) return { status: 200, type: hit.type, body: hit.body, cache: "hit" };
+    let bytes;
+    try {
+      const url = await resolve(id);
+      if (!coverUrl(url)) return text(502, "unavailable");
+      bytes = await fetchBytes(url);
+    } catch (error) {
+      const status = error && (error.status === 403 || error.status === 400) ? error.status : 502;
+      return text(status, status === 403 ? "forbidden" : "unavailable");
+    }
+    const plain = decodeCover(bytes, material);
+    const checked = plain && verifyJpeg(plain);
+    if (!checked) return text(502, "unavailable");
+    loads.set(id, (loads.get(id) || 0) + 1);
+    store(id, plain, t);
+    return { status: 200, type: "image/jpeg", body: plain, cache: "miss", width: checked.width, height: checked.height };
   }
 
   async function handle(req, peerIp) {
@@ -105,34 +121,30 @@ export function createCoverApp(options = {}) {
     if (rawPath.includes("%") || rawPath.includes("//") || rawPath.includes("..") || !rawPath.startsWith("/")) {
       return text(400, "bad path");
     }
-    const match = /^\/v1\/([a-z0-9-]{1,32})\.png$/.exec(rawPath);
+    const match = /^\/v1\/v\/([1-9]\d{0,8})\.png$/.exec(rawPath);
     if (!match) return text(404, "not found");
     const id = match[1];
-    if (rawQuery === "") return text(403, "forbidden");
-    const query = parseQuery(rawQuery);
-    if (!query) return text(400, "bad query");
-    if (!authorized(id, query.exp, query.sig, t)) return text(403, "forbidden");
-    const hit = fromCache(id, t);
-    if (hit) return { status: 200, type: hit.type, body: hit.body, cache: "hit" };
-    const src = approved(id);
-    if (!src) return text(404, "not approved");
-    store(id, src, t);
-    return { status: 200, type: src.type, body: src.bytes, cache: "miss" };
+    if (rawQuery !== "") {
+      const query = parseQuery(rawQuery);
+      if (!query) return text(400, "bad query");
+      if (!authorized(id, query.exp, query.sig, t)) return text(403, "forbidden");
+    }
+    return imageFor(id, t);
   }
 
   return {
     handle,
-    outbound,
     loads: () => new Map(loads),
     rateSize: () => rates.size,
     sign(id, ttlSec = 60, origin) {
+      if (!/^[1-9]\d{0,8}$/.test(id)) throw new Error("bad id");
       if (!/^https:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?$/.test(origin || "")) {
         throw new Error("COVER_PUBLIC_ORIGIN must be an https origin");
       }
       const ttl = Math.min(Math.max(1, ttlSec), maxTtlSec);
       const exp = String(Math.floor(now() / 1000) + ttl);
       const sig = signature(id, exp).toString("base64url");
-      return `${origin}/v1/${id}.png?exp=${exp}&sig=${sig}`;
+      return `${origin}/v1/v/${id}.png?exp=${exp}&sig=${sig}`;
     },
   };
 }
@@ -158,9 +170,15 @@ function normalizeIp(value) {
   return text.startsWith("::ffff:") ? text.slice(7) : text;
 }
 
-export function listen(app, port = 0) {
+export function readSecret() {
+  if (process.env.COVER_SIGNING_SECRET) return process.env.COVER_SIGNING_SECRET;
+  if (!process.env.COVER_SECRET_FILE) return "";
+  return readFileSync(process.env.COVER_SECRET_FILE, "utf8").trim();
+}
+
+export function listen(app, port = 0, host = "127.0.0.1") {
   const server = createServer((req, res) => {
-    req.setTimeout(5_000, () => req.destroy());
+    req.setTimeout(8_000, () => req.destroy());
     Promise.resolve(app.handle(req)).then((result) => {
       if (res.writableEnded) return;
       res.writeHead(result.status, {
@@ -176,29 +194,25 @@ export function listen(app, port = 0) {
       }
     });
   });
-  server.requestTimeout = 5_000;
+  server.requestTimeout = 8_000;
   server.headersTimeout = 2_000;
-  server.timeout = 5_000;
+  server.timeout = 8_000;
   return new Promise((resolve) => {
-    server.listen(port, "127.0.0.1", () => resolve(server));
+    server.listen(port, host, () => resolve(server));
   });
 }
 
-export function printSignedUrl(app, origin) {
-  const url = app.sign("demo", 60, origin);
-  process.stdout.write(`${url}\n`);
-}
-
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const secret = process.env.COVER_SIGNING_SECRET;
+  const secret = readSecret();
+  const material = loadFormatMaterial(process.env.MEDIA_SOURCE || new URL("../src-tauri/src/media.rs", import.meta.url));
   const trusted = (process.env.TRUST_PROXY || "").split(",").map((item) => item.trim()).filter(Boolean);
-  const app = createCoverApp({ secret, trustedProxies: trusted });
-  const port = Number(process.env.PORT || 8787);
+  const app = createCoverApp({ secret, material, trustedProxies: trusted });
   if (process.argv[2] === "sign") {
-    printSignedUrl(app, process.env.COVER_PUBLIC_ORIGIN);
+    process.stdout.write(`${app.sign(process.argv[3] || "1", 60, process.env.COVER_PUBLIC_ORIGIN)}\n`);
   } else {
-    listen(app, port).then((server) => {
-      console.log(`cover service listening on 127.0.0.1:${server.address().port}`);
+    const port = Number(process.env.PORT || 8787);
+    listen(app, port, process.env.BIND || "127.0.0.1").then((server) => {
+      console.log(`cover service listening on ${process.env.BIND || "127.0.0.1"}:${server.address().port}`);
     });
   }
 }

@@ -1,77 +1,111 @@
 import assert from "node:assert/strict";
+import { createCipheriv } from "node:crypto";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import { createCoverApp, listen } from "./server.mjs";
-import { optionalPoster } from "./rex-map.mjs";
+import { loadFormatMaterial } from "./decode.mjs";
+import { sampleJpeg, verifyJpeg } from "./image.mjs";
+import { coverUrl, fetchCoverBytes, resolveCover } from "./source.mjs";
 
 const secret = "test-signing-secret-16";
-const origin = "https://invalid.test";
-let outbound = 0;
+const origin = "https://img-2c812d1bf79fee03e88d.linpika.com";
+const mediaPath = new URL("../src-tauri/src/media.rs", import.meta.url);
+const material = loadFormatMaterial(mediaPath);
 const started = 1_700_000_000_000;
 let clock = started;
+const plain = sampleJpeg(2, 3);
+const cipher = createCipheriv("aes-128-cbc", material.key, material.iv);
+const encrypted = Buffer.concat([cipher.update(plain), cipher.final()]);
+const checked = verifyJpeg(plain);
+assert.equal(checked.format, "jpeg");
+assert.equal(checked.width, 2);
+assert.equal(checked.height, 3);
+
+const calls = { resolve: 0, fetch: 0 };
 const app = createCoverApp({
   secret,
+  material,
   now: () => clock,
   rateMax: 20,
   trustedProxies: ["127.0.0.1"],
-  outbound: () => { outbound += 1; },
+  async resolveCover(id) {
+    calls.resolve += 1;
+    if (id === "13") return "https://evil.example/a.jpg";
+    if (id === "14") { const error = new Error("cover denied"); error.status = 403; throw error; }
+    return "https://pic.drleao.cn/offline.jpg?auth_key=offline";
+  },
+  async fetchCover(url) {
+    calls.fetch += 1;
+    const parsed = new URL(url);
+    if (parsed.hostname !== "pic.drleao.cn") throw new Error("fetch left the allowlist");
+    return encrypted;
+  },
 });
 
-function png(body) {
-  return body.length > 8 && body[0] === 0x89 && body[1] === 0x50 && body.toString("ascii", 12, 16) === "IHDR" && body.includes(Buffer.from("IEND"));
-}
-
-const signed = new URL(app.sign("demo", 60, origin));
-const ok = await app.handle({ url: `${signed.pathname}${signed.search}` });
+const ok = await app.handle({ url: "/v1/v/12.png" });
 assert.equal(ok.status, 200);
 assert.equal(ok.cache, "miss");
-assert.ok(png(ok.body));
-
-const again = await app.handle({ url: `${signed.pathname}?sig=${signed.searchParams.get("sig")}&exp=${signed.searchParams.get("exp")}` });
+assert.equal(ok.type, "image/jpeg");
+assert.equal(verifyJpeg(ok.body).width, 2);
+assert.equal(verifyJpeg(ok.body).height, 3);
+const again = await app.handle({ url: "/v1/v/12.png" });
 assert.equal(again.cache, "hit");
-assert.equal(app.loads().get("demo"), 1);
+assert.equal(calls.fetch, 1);
+assert.equal(calls.resolve, 1);
 
-const denied = await app.handle({ url: "/v1/demo.png" });
-assert.equal(denied.status, 403);
-assert.equal(png(denied.body), false);
+const signed = new URL(app.sign("12", 60, origin));
+const signedHit = await app.handle({ url: `${signed.pathname}?sig=${signed.searchParams.get("sig")}&exp=${signed.searchParams.get("exp")}` });
+assert.equal(signedHit.cache, "hit");
+const forged = await app.handle({ url: "/v1/v/12.png?exp=1700000060&sig=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" });
+assert.equal(forged.status, 403);
+assert.equal(verifyJpeg(forged.body), null);
+assert.equal(calls.fetch, 1);
 
 clock = started + 121_000;
-const replay = await app.handle({ url: `${signed.pathname}${signed.search}` });
-assert.equal(replay.status, 403);
-assert.equal(png(replay.body), false);
+assert.equal((await app.handle({ url: `${signed.pathname}${signed.search}` })).status, 403);
 clock = started;
+assert.equal((await app.handle({ url: "/v1/%76/12.png" })).status, 400);
+assert.equal((await app.handle({ url: "/v1/v/12.png?exp=1&exp=2&sig=abcd" })).status, 400);
+assert.equal((await app.handle({ url: "/v1/v/12.png?url=https://evil.example/a.jpg" })).status, 400);
+assert.equal(calls.fetch, 1);
+assert.equal((await app.handle({ url: "/v1/v/13.png" })).status, 502);
+assert.equal(calls.fetch, 1);
+assert.equal((await app.handle({ url: "/v1/v/14.png" })).status, 403);
+assert.equal((await app.handle({ url: "/v1/v/14.png" })).status, 403);
+assert.equal(calls.fetch, 1);
+assert.equal((await app.handle({ url: "/v1/demo.png" })).status, 404);
 
-assert.equal((await app.handle({ url: "/v1/%64emo.png?exp=1&sig=abcd" })).status, 400);
-assert.equal((await app.handle({ url: "/v1/demo.png?exp=1&exp=2&sig=abcd" })).status, 400);
-assert.equal((await app.handle({ url: "/v1/demo.png?exp=1%30&sig=abcd" })).status, 400);
-assert.equal((await app.handle({ url: `${signed.pathname}${signed.search}&url=https://example.invalid/a.jpg` })).status, 400);
-assert.equal(outbound, 0);
+assert.equal(coverUrl("http://pic.drleao.cn/a.jpg"), null);
+assert.equal(coverUrl("https://user:pass@pic.drleao.cn/a.jpg"), null);
+assert.equal(coverUrl("https://pic.drleao.cn:8443/a.jpg"), null);
+assert.equal(coverUrl("https://evil.example/a.jpg"), null);
+assert.equal(coverUrl("https://pic.drleao.cn/a.jpg").hostname, "pic.drleao.cn");
 
-const tampered = new URL(signed);
-tampered.searchParams.set("sig", "a".repeat(43));
-assert.equal((await app.handle({ url: `${tampered.pathname}${tampered.search}` })).status, 403);
-assert.equal((await app.handle({ url: app.sign("other", 60, origin).replace(origin, "") })).status, 404);
+await assert.rejects(() => fetchCoverBytes("https://pic.drleao.cn/start.jpg", async (url) => {
+  if (url.endsWith("/start.jpg")) {
+    return { status: 302, headers: { get: () => "https://evil.example/a.jpg" }, arrayBuffer: async () => Buffer.alloc(0) };
+  }
+  throw new Error("followed a rejected redirect");
+}), /cover redirect rejected/);
 
-const proxy = await app.handle({
-  url: "/v1/demo.png",
-  headers: { "x-forwarded-for": "203.0.113.9" },
-}, "192.0.2.8");
-assert.equal(proxy.status, 403);
-const trusted = createCoverApp({ secret, now: () => clock, rateMax: 2, trustedProxies: ["127.0.0.1"] });
-const trustedUrl = trusted.sign("demo", 30, origin).replace(origin, "");
-assert.equal((await trusted.handle({ url: trustedUrl, headers: { "x-forwarded-for": "203.0.113.9" } }, "127.0.0.1")).status, 200);
-assert.equal((await trusted.handle({ url: trustedUrl, headers: { "x-forwarded-for": "203.0.113.9" } }, "127.0.0.1")).status, 200);
-assert.equal((await trusted.handle({ url: trustedUrl, headers: { "x-forwarded-for": "203.0.113.9" } }, "127.0.0.1")).status, 429);
-assert.equal((await trusted.handle({ url: "/healthz", headers: { "x-forwarded-for": "203.0.113.9, 198.51.100.2" } }, "127.0.0.1")).status, 200);
+const apiCalls = [];
+await assert.rejects(() => resolveCover("12", async (url, options) => {
+  apiCalls.push({ url, headers: options.headers, body: JSON.parse(options.body) });
+  return { status: 200, json: async () => ({ status: 1, data: { cover: "https://evil.example/a.jpg" } }) };
+}), /cover source rejected/);
+assert.equal(apiCalls[0].body.path, "/api/videos/12");
+assert.equal(apiCalls[0].headers.Authorization, undefined);
+assert.equal(apiCalls[0].url, "https://huangguoai.com/api/edge/request");
 
-const many = createCoverApp({ secret, rateMaxKeys: 2, now: () => clock });
+const many = createCoverApp({ secret, material, rateMaxKeys: 2, now: () => clock, resolveCover: async () => { throw new Error("unused"); } });
 await many.handle({ url: "/healthz" }, "192.0.2.1");
 await many.handle({ url: "/healthz" }, "192.0.2.2");
 await many.handle({ url: "/healthz" }, "192.0.2.3");
 assert.ok(many.rateSize() <= 2);
 
 const child = spawn(process.execPath, ["cover-service/server.mjs"], {
-  env: { ...process.env, COVER_SIGNING_SECRET: secret, PORT: "0", TRUST_PROXY: "" },
+  env: { ...process.env, COVER_SIGNING_SECRET: secret, PORT: "0" },
   stdio: ["ignore", "pipe", "pipe"],
 });
 let log = "";
@@ -86,64 +120,15 @@ await new Promise((resolve, reject) => {
     }
   });
 });
-assert.equal(log.includes(secret), false);
+const source = readFileSync(mediaPath, "utf8");
+const materialText = /const IMG_KEY: &\[u8\] = b"([^"]+)";/.exec(source)[1];
+if (log.includes(materialText) || log.includes(secret)) throw new Error("service log exposed secret material");
 const port = Number(log.match(/127\.0\.0\.1:(\d+)/)[1]);
-const health = await fetch(`http://127.0.0.1:${port}/healthz`);
-assert.equal(health.status, 200);
-assert.equal(await health.text(), "ok");
-const signer = spawn(process.execPath, ["cover-service/server.mjs", "sign"], {
-  env: { ...process.env, COVER_SIGNING_SECRET: secret, COVER_PUBLIC_ORIGIN: origin },
-  stdio: ["ignore", "pipe", "pipe"],
-});
-let signedOut = "";
-signer.stdout.on("data", (chunk) => { signedOut += chunk; });
-await once(signer, "exit");
-const lines = signedOut.trim().split("\n");
-assert.equal(lines.length, 1);
-assert.equal(lines[0].startsWith(`${origin}/v1/demo.png?exp=`), true);
-assert.equal(signedOut.includes(secret), false);
-const image = await fetch(`http://127.0.0.1:${port}${lines[0].slice(origin.length)}`);
-assert.equal(image.status, 200);
-assert.equal(image.headers.get("content-type"), "image/png");
-const liveBytes = Buffer.from(await image.arrayBuffer());
-assert.equal(liveBytes[0], 0x89);
+assert.equal(await (await fetch(`http://127.0.0.1:${port}/healthz`)).text(), "ok");
 child.kill("SIGTERM");
 await once(child, "exit");
 await assert.rejects(fetch(`http://127.0.0.1:${port}/healthz`));
 
-const scriptPort = "18787";
-const start = spawn("sh", ["bin/cover-start.sh"], {
-  cwd: "cover-service",
-  env: { ...process.env, COVER_PUBLIC_ORIGIN: origin, PORT: scriptPort, COVER_SIGNING_SECRET: "" },
-  stdio: ["ignore", "pipe", "pipe"],
-});
-let startErr = "";
-start.stderr.on("data", (chunk) => { startErr += chunk; });
-assert.equal((await once(start, "exit"))[0], 0);
-let up = false;
-for (let i = 0; i < 30; i += 1) {
-  try {
-    const probe = await fetch(`http://127.0.0.1:${scriptPort}/healthz`);
-    if (probe.status === 200) { up = true; break; }
-  } catch { /* wait */ }
-  await new Promise((resolve) => setTimeout(resolve, 50));
-}
-assert.equal(up, true);
-assert.equal(startErr.includes("base64"), false);
-const healthScript = spawn("sh", ["bin/cover-health.sh"], {
-  cwd: "cover-service",
-  env: { ...process.env, PORT: scriptPort },
-  stdio: ["ignore", "pipe", "pipe"],
-});
-let healthOut = "";
-healthScript.stdout.on("data", (chunk) => { healthOut += chunk; });
-assert.equal((await once(healthScript, "exit"))[0], 0);
-assert.equal(healthOut.trim(), "ok");
-const stop = spawn("sh", ["bin/cover-stop.sh"], { cwd: "cover-service", stdio: "ignore" });
-assert.equal((await once(stop, "exit"))[0], 0);
-await assert.rejects(fetch(`http://127.0.0.1:${scriptPort}/healthz`));
-
-assert.deepEqual(optionalPoster(`http://127.0.0.1/v1/demo.png?exp=1&sig=abc`), {});
-assert.equal(optionalPoster(`${origin}/v1/demo.png?exp=1&sig=abc`).posterPath.includes("sig=abc"), true);
-assert.throws(() => createCoverApp({ secret: "short" }));
-console.log("cover service tests: start, signed png, auth, query pollution, rate cap, cache, stop");
+const widget = readFileSync(new URL("../rex/hghub.widget.js", import.meta.url), "utf8");
+if (widget.includes(materialText)) throw new Error("widget contains format material");
+console.log("cover service tests: offline jpeg, allowlist, denied, auth before cache, stop");

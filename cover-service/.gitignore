@@ -1,3 +1,5 @@
 run/
 .env
 *.secret
+node_modules/
+.build/

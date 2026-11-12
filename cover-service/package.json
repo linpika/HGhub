@@ -1,0 +1,8 @@
+{
+  "name": "hghub-cover",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "jpeg-js": "0.4.4"
+  }
+}

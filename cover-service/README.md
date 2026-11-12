@@ -1,26 +1,30 @@
-# 自管 Linux 封面服务
+# 自管封面服务
 
-这是演示用的签名 PNG 服务，不是 HGhub 海报解密。0.2.1 播放模块没有改。密文封面适配器没有接上。
+个人非商业使用。服务只向 `https://huangguoai.com/api/edge/request` 取游客详情，只下载主机名为 `pic.drleao.cn` 的封面，再用仓库里已有的图片格式处理把它还原成 JPEG。它不接收任意 URL，不携带登录凭据，401/403 直接失败。图片权利不因代码许可证而改变。
 
-本地检查：
+Rex 模块 0.2.2 的 `posterPath` 是：
+
+```text
+https://img-2c812d1bf79fee03e88d.linpika.com/v1/v/{编号}.png
+```
+
+播放链路仍是 0.2.1 的游客接口。
+
+离线检查和真实样本要分开跑：
 
 ```bash
 node cover-service/test.mjs
+node cover-service/live-sample.mjs
+node rex/test-widget.mjs
 ```
 
-启动前要自己填两个空项，脚本不会替你写域名：
+`test.mjs` 不访问网络。`live-sample.mjs` 只处理编号 12 的一张封面，并打印解码后的格式和尺寸。这两项都不是 Rex 真机验收。
+
+这台机器没有 Node 和 nginx。80 与 8443 已由 Caddy 使用，443 已由 xray 使用。部署文件只把容器发布到 `127.0.0.1:8787`：
 
 ```bash
-export COVER_PUBLIC_ORIGIN='https://你的子域名'
-export PORT=8787
-sh cover-service/bin/cover-start.sh
-sh cover-service/bin/cover-health.sh
-COVER_PUBLIC_ORIGIN="$COVER_PUBLIC_ORIGIN" COVER_SIGNING_SECRET="$(cat cover-service/run/secret)" sh cover-service/bin/cover-sign.sh
-sh cover-service/bin/cover-stop.sh
+sh cover-service/deploy/cover-up.sh
+sh cover-service/deploy/cover-rollback.sh
 ```
 
-`cover-sign.sh` 的标准输出只有一行 URL。密钥在 `run/secret`，不进入仓库。
-
-停服用 `cover-stop.sh`。若安装时保留了上一份目录，把 `COVER_ROOT` 指到含 `current` 符号链接和 `previous` 目录的位置，再执行 `cover-rollback.sh`。systemd 单元和 nginx `location` 模板在 `deploy/`。把 `__INSTALL_DIR__` 和 `__COVER_SERVER_NAME__` 换成这台机器上的真实值，并沿用现有的 TLS，不另装一套。这些模板没有在 systemd 或公网证书上运行过。
-
-上线前只需要三样已经存在的事实：能登录的目标主机、要挂上的 HTTPS 子域名，以及仍然缺少的合法明文封面输出。没有第三样时，服务只能发这张演示 PNG。
+`deploy/caddy-snippet.caddy` 要放进现有站点，不能新监听上述端口。Docker 镜像、公网 TLS 和 Rex 真机都还没有在这里跑过。

@@ -105,7 +105,7 @@ test("导入声明与官方公开模块一致，且只有一份完整元数据",
   assert.equal(source.includes("/* WidgetMetadata"), false);
   const metadata = executableMetadata(source);
   assert.equal(metadata.id, "hghub.library");
-  assert.equal(metadata.version, "0.2.1");
+  assert.equal(metadata.version, "0.2.2");
   assert.equal(metadata.requiredVersion, "0.0.1");
   assert.deepEqual(metadata.modules.map((item) => item.id), [
     "feed", "ai-duanju", "ai-manju",
@@ -128,7 +128,7 @@ test("空对象的 base64 与客户端 STANDARD 编码一致", () => {
   assert.equal(Buffer.from("e30=", "base64").toString(), "{}");
 });
 
-test("列表到详情再到播放地址，且不把封面密文当成封面", async () => {
+test("列表到详情再到播放地址，海报指向个人封面服务而不是密文地址", async () => {
   const playUrl = "https://cdn.example/videos/sample.m3u8";
   const http = scriptedHttp([
     {
@@ -169,6 +169,7 @@ test("列表到详情再到播放地址，且不把封面密文当成封面", as
   assert.equal(list[0].type, "detail");
   assert.equal(list[0].videoUrl, undefined);
   assert.equal(list[0].coverUrl, undefined);
+  assert.equal(list[0].posterPath, "https://img-2c812d1bf79fee03e88d.linpika.com/v1/v/501.png");
   assert.equal(list[0].mediaType, "tv");
 
   const detail = await sandbox.loadDetail(list[0].link);
@@ -176,6 +177,7 @@ test("列表到详情再到播放地址，且不把封面密文当成封面", as
   assert.equal(detail.episodeItems[1].link, "hghub:video:501:2");
   assert.equal(detail.episodeItems[1].videoUrl, undefined);
   assert.equal(detail.coverUrl, undefined);
+  assert.equal(detail.posterPath, "https://img-2c812d1bf79fee03e88d.linpika.com/v1/v/501.png");
 
   const resources = await sandbox.loadResource({ link: detail.episodeItems[1].link, episode: 2 });
   assert.equal(resources.length, 1);
@@ -272,7 +274,7 @@ test("不兼容响应、重定向、缺选集和凭据都失败", async () => {
   assert.equal(http.calls.length, 0);
 });
 
-test("分类、排行榜和最新都能进同一条详情与播放链路，且不把密文封面当成海报", async () => {
+test("分类、排行榜和最新都能进同一条详情与播放链路，海报指向个人封面服务", async () => {
   const playUrl = "https://cdn.example/videos/sample.m3u8";
   const card = {
     ...feedData.items[0],
@@ -302,7 +304,8 @@ test("分类、排行榜和最新都能进同一条详情与播放链路，且�
     assert.equal(list[0].description, listCall.expectDescription);
     assert.equal(list[0].genreTitle, listCall.expectGenre);
     assert.equal(list[0].coverUrl, undefined);
-    assert.equal(list[0].posterPath, undefined);
+    assert.equal(list[0].posterPath, "https://img-2c812d1bf79fee03e88d.linpika.com/v1/v/501.png");
+    assert.equal(list[0].posterPath.includes("pic.example"), false);
     assert.equal(list[0].backdropPath, undefined);
     const detail = await sandbox.loadDetail(list[0].link);
     assert.equal(detail.episodeItems.length, 2);

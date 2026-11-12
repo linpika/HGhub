@@ -1,0 +1,20 @@
+services:
+  cover:
+    image: hghub-cover:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - cover-data:/data
+    environment:
+      MEDIA_SOURCE: /app/media.rs
+      BIND: 0.0.0.0
+      PORT: "8787"
+      COVER_SECRET_FILE: /data/secret
+      COVER_PUBLIC_ORIGIN: https://img-2c812d1bf79fee03e88d.linpika.com
+    restart: unless-stopped
+
+volumes:
+  cover-data:
