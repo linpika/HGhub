@@ -1,28 +1,26 @@
-# 封面服务骨架
+# 自管 Linux 封面服务
 
-独立的本地签名图片服务。默认不接入 0.2.1，因此不会假装 HGhub 海报已经出现。HGhub 密文适配器没有实现，源码里也没有应用密钥。
+这是演示用的签名 PNG 服务，不是 HGhub 海报解密。0.2.1 播放模块没有改。密文封面适配器没有接上。
 
-选择 Node 而不是 Workers：本地用 Node 自带的 `http`、`crypto`、`zlib` 就能测签名、缓存和限流，不必再装 Wrangler。Workers 文档里的 AES-CBC 只有在获得授权解密之后才用得上。
-
-## 运行
-
-密钥只从环境变量读入，不要写进命令历史以外的文件：
-
-```bash
-COVER_SIGNING_SECRET='至少十六个字符的运行时密钥' node cover-service/server.mjs
-```
-
-进程只监听本机。测试：
+本地检查：
 
 ```bash
 node cover-service/test.mjs
 ```
 
-`optionalPoster` 只接受已经签好的 `https://` 地址，并返回 `{ posterPath }`。0.2.1 没有调用它。真机已经确认普通 HTTPS 的 `coverUrl` 和 `posterPath` 都能出图；data URL 不再使用。
+启动前要自己填两个空项，脚本不会替你写域名：
 
-## 上线前仍要确认
+```bash
+export COVER_PUBLIC_ORIGIN='https://你的子域名'
+export PORT=8787
+sh cover-service/bin/cover-start.sh
+sh cover-service/bin/cover-health.sh
+COVER_PUBLIC_ORIGIN="$COVER_PUBLIC_ORIGIN" COVER_SIGNING_SECRET="$(cat cover-service/run/secret)" sh cover-service/bin/cover-sign.sh
+sh cover-service/bin/cover-stop.sh
+```
 
-- 部署平台和域名。Cloudflare Workers 或自管 Linux 都可以，但本仓库没有替你部署。
-- 允许的图片来源。现在只有程序内生成的 `demo`。HGhub 封面要等作者提供明文图片输出，或另有写明的解密依据。
-- 对外必须是 HTTPS。本地测试使用 `http://127.0.0.1`，不等于已经上线。
-- 把签好的 URL 放进 Rex 后，还要在真机看这一条带查询串的地址。现有真机结果只覆盖了不带本服务签名的普通 HTTPS 图片。
+`cover-sign.sh` 的标准输出只有一行 URL。密钥在 `run/secret`，不进入仓库。
+
+停服用 `cover-stop.sh`。若安装时保留了上一份目录，把 `COVER_ROOT` 指到含 `current` 符号链接和 `previous` 目录的位置，再执行 `cover-rollback.sh`。systemd 单元和 nginx `location` 模板在 `deploy/`。把 `__INSTALL_DIR__` 和 `__COVER_SERVER_NAME__` 换成这台机器上的真实值，并沿用现有的 TLS，不另装一套。这些模板没有在 systemd 或公网证书上运行过。
+
+上线前只需要三样已经存在的事实：能登录的目标主机、要挂上的 HTTPS 子域名，以及仍然缺少的合法明文封面输出。没有第三样时，服务只能发这张演示 PNG。
