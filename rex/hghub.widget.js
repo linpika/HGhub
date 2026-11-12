@@ -4,7 +4,7 @@ WidgetMetadata = {
   description: "在播放器里浏览 HGhub 已使用的公开游客目录，并在起播时解析播放地址。不含登录、收藏或评论。",
   author: "HGhub",
   site: "https://huangguoai.com",
-  version: "0.2.0",
+  version: "0.2.1",
   requiredVersion: "0.0.1",
   detailCacheDuration: 60,
   modules: [
@@ -47,30 +47,6 @@ WidgetMetadata = {
       cacheDuration: 120,
       params: [
         { name: "cate", title: "分类", type: "constant", value: "ai-manju" },
-        { name: "page", title: "页码", type: "page", value: "1" },
-      ],
-    },
-    {
-      id: "ai-huanlian",
-      title: "AI换脸",
-      description: "分类频道，每页 20 条。",
-      requiresWebView: false,
-      functionName: "loadCategory",
-      cacheDuration: 120,
-      params: [
-        { name: "cate", title: "分类", type: "constant", value: "ai-huanlian" },
-        { name: "page", title: "页码", type: "page", value: "1" },
-      ],
-    },
-    {
-      id: "ai-mogai",
-      title: "AI魔改",
-      description: "分类频道，每页 20 条。",
-      requiresWebView: false,
-      functionName: "loadCategory",
-      cacheDuration: 120,
-      params: [
-        { name: "cate", title: "分类", type: "constant", value: "ai-mogai" },
         { name: "page", title: "页码", type: "page", value: "1" },
       ],
     },
@@ -133,8 +109,6 @@ var HGhubWidget = (function () {
   var CATEGORIES = {
     "ai-duanju": true,
     "ai-manju": true,
-    "ai-huanlian": true,
-    "ai-mogai": true,
   };
   var RANKS = { hot: true, recommend: true, potential: true };
 

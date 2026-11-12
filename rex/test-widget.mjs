@@ -105,16 +105,17 @@ test("导入声明与官方公开模块一致，且只有一份完整元数据",
   assert.equal(source.includes("/* WidgetMetadata"), false);
   const metadata = executableMetadata(source);
   assert.equal(metadata.id, "hghub.library");
-  assert.equal(metadata.version, "0.2.0");
+  assert.equal(metadata.version, "0.2.1");
   assert.equal(metadata.requiredVersion, "0.0.1");
   assert.deepEqual(metadata.modules.map((item) => item.id), [
-    "feed", "ai-duanju", "ai-manju", "ai-huanlian", "ai-mogai",
+    "feed", "ai-duanju", "ai-manju",
     "rank-hot", "rank-recommend", "rank-potential", "loadResource",
   ]);
+  assert.equal(metadata.modules.some((item) => item.id === "ai-huanlian" || item.id === "ai-mogai"), false);
   assert.equal(metadata.modules[1].params[0].type, "constant");
   assert.equal(metadata.modules[1].params[0].value, "ai-duanju");
-  assert.equal(metadata.modules[5].params[0].value, "hot");
-  assert.equal(metadata.modules[8].type, "stream");
+  assert.equal(metadata.modules[3].params[0].value, "hot");
+  assert.equal(metadata.modules[6].type, "stream");
   const sandbox = loadWidget({ async post() { throw new Error("不应发请求"); } });
   for (const name of ["loadFeed", "loadCategory", "loadRank", "loadDetail", "loadResource"]) {
     assert.equal(typeof sandbox[name], "function");
@@ -338,6 +339,22 @@ test("分类、排行榜和最新都能进同一条详情与播放链路，且�
   assert.equal(rankHttp.calls.length, 0);
   await assert.rejects(() => loadWidget(scriptedHttp([])).loadCategory({ cate: "other" }), /分类无效/);
   await assert.rejects(() => loadWidget(scriptedHttp([])).loadRank({ kind: "topic" }), /榜单无效/);
+});
+
+test("已下线分类返回 410 时失败，并且不会被收进模块入口", async () => {
+  const http = scriptedHttp([
+    { response: jsonResponse({ status: 0, msg: "内容已下线" }, 410) },
+  ]);
+  await assert.rejects(
+    () => loadWidget(http).loadCategory({ cate: "ai-duanju", page: 1 }),
+    /服务器请求失败（HTTP 410）/,
+  );
+  assert.equal(http.calls.length, 1);
+  assert.equal(http.calls[0].url, "https://huangguoai.com/api/edge/request");
+  await assert.rejects(
+    () => loadWidget(scriptedHttp([])).loadCategory({ cate: "ai-huanlian", page: 1 }),
+    /分类无效/,
+  );
 });
 
 test("详情没有选集时不编造选集或播放地址", async () => {
