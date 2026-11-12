@@ -2,7 +2,7 @@
 
 这是一个单文件 JavaScript 模块：`rex/hghub.widget.js`。它只复用本仓库客户端已经在用的游客读接口，提供最新列表、影片详情和起播时的播放地址。原来的 Tauri 应用没有改行为。
 
-模块固定请求 `https://huangguoai.com/api/edge/request`。它不登录、不保存口令、不携带 `Authorization`，也不在失败后改走 `huangguoai.ai` 或镜像。封面仍由原客户端本地解密；模块不嵌入那把密钥，因此不返回封面地址。
+模块固定请求 `https://huangguoai.com/api/edge/request`。它不登录、不保存口令、不携带 `Authorization`，也不在失败后改走 `huangguoai.ai` 或镜像。0.2.0 增加了原客户端已有的四个分类频道和三份排行榜，并把简介、标签带到 Rex 的 `description` 和 `genreTitle`。封面地址在游客接口里是 HTTPS，但正文不是图片；Mac 安装包用 Rust 本地协议解密后才显示。这个模块不复制那把应用内密钥，因此不填写海报字段。
 
 许可证与仓库相同：[PolyForm Noncommercial 1.0.0](../LICENSE)。模块文件头带有许可证要求的 `Required Notice`。
 
@@ -42,15 +42,28 @@ https://raw.githubusercontent.com/linpika/HGhub/cursor/rex-hghub-module-99df/rex
 
 ## 真机上看一条影片
 
-1. 用上面的 https 链接，或模块页「＋」从文件导入 0.1.1。导入失败就停，并记下 Rex 版本、用的是链接还是文件，以及完整失败提示。
-2. 打开模块里的「最新」，确认能看到一页条目标题。封面预期为空，因为模块故意不返回加密封面。
+1. 用上面的 https 链接，或模块页「＋」从文件导入当前版本。0.1.1 仍可从提交 `c741fdfc8969c648cedb1b838fc8eb1d999546cb` 的同一路径安装，作为已播放版本的回退。导入失败就停，并记下 Rex 版本、用的是链接还是文件，以及完整失败提示。
+2. 打开「最新」、任一分类或任一榜单，确认能看到标题、简介或标签。海报预期为空，见下面的海报结论。
 3. 点开一条，确认详情里有选集。没有选集就停。
 4. 点一集。播放器应调用 `loadResource`，向固定线路取播放地址。能开始播放才算这条链路在真机上通过。
 5. 若提示需要登录、HTTP 401/403，或播放地址为空，模块会停在错误上。不要换线路，也不要填账号。
 
 ## 不在本模块里的事
 
-登录、注册、评论、收藏、关注、搜索、分类、排行和文章都留在原应用。模块也不代理 HLS 分片，不改写播放列表，不下载整部影片。
+登录、注册、评论、收藏、关注、搜索和文章仍留在原应用。分类页里的「最新 / 最热 / 高分」是客户端对已加载结果的本地排序，接口没有对应参数，模块按接口原顺序分页。仓库里没有专题接口。模块也不代理 HLS 分片，不改写播放列表，不下载整部影片。
+
+## 能力对照
+
+| 能力 | 原客户端来源 | Rex 0.2.0 |
+| --- | --- | --- |
+| 最新列表与分页 | `GET /api/videos`，`src-tauri/src/api.rs` 的 `api_feed` | `loadFeed` |
+| 四个分类与分页 | `Category.tsx` 的 `CHANNELS`，`GET /api/videos/category/{cate}` | 四个常量分类模块 |
+| 热播 / 推荐 / 潜力榜 | `Search.tsx` 的 `RANK_TABS`，`GET /api/ranks/{kind}`，接口本身不分页 | 三个榜单模块；第 2 页返回空数组 |
+| 简介 | 列表和详情的 `description` | `description` |
+| 标签 | `tags` 字符串数组；没有按标签筛选的接口 | 只写入 `genreTitle`，不做成可点分类 |
+| 分集与播放 | `GET /api/videos/{id}` 的 `episodes`，再 `POST .../playback` | 与 0.1.1 相同 |
+| 海报 | `media.rs` 把封面当 AES 密文，经 `hg://` 或 `http://hg.localhost` 解密。2026-11-12 游客探针：封面主机 `pic.drleao.cn`、路径以 `.jpg` 结尾，但前 16 字节不是 JPEG/PNG/GIF/WEBP，`Content-Type` 为 `binary/octet-stream` | 不返回 `coverUrl` / `posterPath`。这不是已完成的空图 |
+| 专题 | 源码中没有对应影片接口 | 未实现 |
 
 ## 兼容证据
 

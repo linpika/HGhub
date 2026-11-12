@@ -105,15 +105,18 @@ test("导入声明与官方公开模块一致，且只有一份完整元数据",
   assert.equal(source.includes("/* WidgetMetadata"), false);
   const metadata = executableMetadata(source);
   assert.equal(metadata.id, "hghub.library");
-  assert.equal(metadata.version, "0.1.1");
+  assert.equal(metadata.version, "0.2.0");
   assert.equal(metadata.requiredVersion, "0.0.1");
-  assert.equal(metadata.modules.length, 2);
-  assert.deepEqual(metadata.modules.map((item) => item.functionName), ["loadFeed", "loadResource"]);
-  assert.equal(metadata.modules[0].type, undefined);
-  assert.equal(metadata.modules[1].id, "loadResource");
-  assert.equal(metadata.modules[1].type, "stream");
+  assert.deepEqual(metadata.modules.map((item) => item.id), [
+    "feed", "ai-duanju", "ai-manju", "ai-huanlian", "ai-mogai",
+    "rank-hot", "rank-recommend", "rank-potential", "loadResource",
+  ]);
+  assert.equal(metadata.modules[1].params[0].type, "constant");
+  assert.equal(metadata.modules[1].params[0].value, "ai-duanju");
+  assert.equal(metadata.modules[5].params[0].value, "hot");
+  assert.equal(metadata.modules[8].type, "stream");
   const sandbox = loadWidget({ async post() { throw new Error("不应发请求"); } });
-  for (const name of ["loadFeed", "loadDetail", "loadResource"]) {
+  for (const name of ["loadFeed", "loadCategory", "loadRank", "loadDetail", "loadResource"]) {
     assert.equal(typeof sandbox[name], "function");
   }
 });
@@ -264,8 +267,77 @@ test("不兼容响应、重定向、缺选集和凭据都失败", async () => {
     /模块不接受登录凭据/,
   );
   const http = scriptedHttp([]);
-  await assert.rejects(() => loadWidget(http).loadFeed({ genreId: "样例" }), /没有分类或人物列表/);
+  await assert.rejects(() => loadWidget(http).loadFeed({ genreId: "样例" }), /没有按标签或人物筛选的接口/);
   assert.equal(http.calls.length, 0);
+});
+
+test("分类、排行榜和最新都能进同一条详情与播放链路，且不把密文封面当成海报", async () => {
+  const playUrl = "https://cdn.example/videos/sample.m3u8";
+  const card = {
+    ...feedData.items[0],
+    cover: "https://pic.example/cipher.jpg?auth=1",
+    description: "合成简介",
+    tags: ["标签甲", "标签乙"],
+  };
+  const rankCard = {
+    video_id: 501,
+    title: "样片甲",
+    cover: "https://pic.example/cipher.jpg",
+    tags: ["标签甲"],
+    score: 8.5,
+    episode_count: 2,
+    cate_name: "短剧",
+    rank: 1,
+  };
+  async function playThrough(listCall) {
+    const http = scriptedHttp([
+      listCall,
+      { response: jsonResponse(envelope(detailData)) },
+      { response: jsonResponse(envelope({ streams: { main: playUrl }, video_url: "" })) },
+    ]);
+    const sandbox = loadWidget(http);
+    const list = await listCall.run(sandbox);
+    assert.equal(list[0].link, "hghub:video:501");
+    assert.equal(list[0].description, listCall.expectDescription);
+    assert.equal(list[0].genreTitle, listCall.expectGenre);
+    assert.equal(list[0].coverUrl, undefined);
+    assert.equal(list[0].posterPath, undefined);
+    assert.equal(list[0].backdropPath, undefined);
+    const detail = await sandbox.loadDetail(list[0].link);
+    assert.equal(detail.episodeItems.length, 2);
+    assert.equal(detail.description, "合成详情");
+    const resources = await sandbox.loadResource({ link: detail.episodeItems[0].link });
+    assert.equal(resources[0].url, playUrl);
+    assert.equal(http.calls[0].body.path, listCall.path);
+  }
+  await playThrough({
+    path: "/api/videos?page=1&size=20",
+    expectDescription: "合成简介",
+    expectGenre: "标签甲 / 标签乙",
+    response: jsonResponse(envelope({ items: [card], pagination: feedData.pagination })),
+    run: (sandbox) => sandbox.loadFeed({ page: 1 }),
+  });
+  await playThrough({
+    path: "/api/videos/category/ai-duanju?page=2&size=20",
+    expectDescription: "合成简介",
+    expectGenre: "标签甲 / 标签乙",
+    response: jsonResponse(envelope({ items: [card], pagination: { page: 2, pages: 2, size: 20, total: 21 } })),
+    run: (sandbox) => sandbox.loadCategory({ cate: "ai-duanju", page: "2" }),
+  });
+  await playThrough({
+    path: "/api/ranks/hot",
+    expectDescription: undefined,
+    expectGenre: "标签甲",
+    response: jsonResponse(envelope({ type: "hot", items: [rankCard] })),
+    run: (sandbox) => sandbox.loadRank({ kind: "hot" }),
+  });
+  const rankHttp = scriptedHttp([]);
+  const secondPage = await loadWidget(rankHttp).loadRank({ kind: "recommend", page: 2 });
+  assert.equal(Array.isArray(secondPage), true);
+  assert.equal(secondPage.length, 0);
+  assert.equal(rankHttp.calls.length, 0);
+  await assert.rejects(() => loadWidget(scriptedHttp([])).loadCategory({ cate: "other" }), /分类无效/);
+  await assert.rejects(() => loadWidget(scriptedHttp([])).loadRank({ kind: "topic" }), /榜单无效/);
 });
 
 test("详情没有选集时不编造选集或播放地址", async () => {

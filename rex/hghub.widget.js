@@ -4,7 +4,7 @@ WidgetMetadata = {
   description: "在播放器里浏览 HGhub 已使用的公开游客目录，并在起播时解析播放地址。不含登录、收藏或评论。",
   author: "HGhub",
   site: "https://huangguoai.com",
-  version: "0.1.1",
+  version: "0.2.0",
   requiredVersion: "0.0.1",
   detailCacheDuration: 60,
   modules: [
@@ -24,6 +24,87 @@ WidgetMetadata = {
           description: "从 1 开始",
           value: "1",
         },
+      ],
+    },
+    {
+      id: "ai-duanju",
+      title: "AI成人短剧",
+      description: "分类频道，每页 20 条。",
+      requiresWebView: false,
+      functionName: "loadCategory",
+      cacheDuration: 120,
+      params: [
+        { name: "cate", title: "分类", type: "constant", value: "ai-duanju" },
+        { name: "page", title: "页码", type: "page", value: "1" },
+      ],
+    },
+    {
+      id: "ai-manju",
+      title: "AI成人漫剧",
+      description: "分类频道，每页 20 条。",
+      requiresWebView: false,
+      functionName: "loadCategory",
+      cacheDuration: 120,
+      params: [
+        { name: "cate", title: "分类", type: "constant", value: "ai-manju" },
+        { name: "page", title: "页码", type: "page", value: "1" },
+      ],
+    },
+    {
+      id: "ai-huanlian",
+      title: "AI换脸",
+      description: "分类频道，每页 20 条。",
+      requiresWebView: false,
+      functionName: "loadCategory",
+      cacheDuration: 120,
+      params: [
+        { name: "cate", title: "分类", type: "constant", value: "ai-huanlian" },
+        { name: "page", title: "页码", type: "page", value: "1" },
+      ],
+    },
+    {
+      id: "ai-mogai",
+      title: "AI魔改",
+      description: "分类频道，每页 20 条。",
+      requiresWebView: false,
+      functionName: "loadCategory",
+      cacheDuration: 120,
+      params: [
+        { name: "cate", title: "分类", type: "constant", value: "ai-mogai" },
+        { name: "page", title: "页码", type: "page", value: "1" },
+      ],
+    },
+    {
+      id: "rank-hot",
+      title: "热播榜",
+      description: "热力指数榜。接口不分页。",
+      requiresWebView: false,
+      functionName: "loadRank",
+      cacheDuration: 120,
+      params: [
+        { name: "kind", title: "榜单", type: "constant", value: "hot" },
+      ],
+    },
+    {
+      id: "rank-recommend",
+      title: "推荐榜",
+      description: "推荐值榜。接口不分页。",
+      requiresWebView: false,
+      functionName: "loadRank",
+      cacheDuration: 120,
+      params: [
+        { name: "kind", title: "榜单", type: "constant", value: "recommend" },
+      ],
+    },
+    {
+      id: "rank-potential",
+      title: "潜力榜",
+      description: "潜力值榜。接口不分页。",
+      requiresWebView: false,
+      functionName: "loadRank",
+      cacheDuration: 120,
+      params: [
+        { name: "kind", title: "榜单", type: "constant", value: "potential" },
       ],
     },
     {
@@ -49,6 +130,13 @@ var HGhubWidget = (function () {
   var USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
   var PAGE_SIZE = 20;
+  var CATEGORIES = {
+    "ai-duanju": true,
+    "ai-manju": true,
+    "ai-huanlian": true,
+    "ai-mogai": true,
+  };
+  var RANKS = { hot: true, recommend: true, potential: true };
 
   function fail(message) {
     throw new Error(message);
@@ -174,6 +262,20 @@ var HGhubWidget = (function () {
     return /访问被拒绝（HTTP (401|403)）/.test(String(error && error.message));
   }
 
+  function tagsOf(value) {
+    if (!Array.isArray(value)) return [];
+    return value.filter(function (tag) { return typeof tag === "string" && tag.trim(); });
+  }
+
+  function applyText(item, source) {
+    if (typeof source.description === "string" && source.description) item.description = source.description;
+    if (typeof source.score === "number") item.rating = String(source.score);
+    if (typeof source.created_at === "string" && source.created_at) item.releaseDate = source.created_at;
+    var tags = tagsOf(source.tags);
+    if (tags.length) item.genreTitle = tags.join(" / ");
+    else if (typeof source.cate_name === "string" && source.cate_name) item.genreTitle = source.cate_name;
+  }
+
   function cardItem(card) {
     if (!card || typeof card !== "object" || Array.isArray(card)) fail("列表里有无法识别的条目");
     var id = positiveInt(card.id, "影片编号");
@@ -186,12 +288,23 @@ var HGhubWidget = (function () {
       link: "hghub:video:" + id,
       mediaType: episodes > 1 ? "tv" : "movie",
     };
-    if (typeof card.description === "string" && card.description) item.description = card.description;
-    if (typeof card.score === "number") item.rating = String(card.score);
-    if (typeof card.created_at === "string" && card.created_at) item.releaseDate = card.created_at;
-    if (Array.isArray(card.tags) && card.tags.length) {
-      item.genreTitle = card.tags.filter(function (tag) { return typeof tag === "string" && tag; }).join(" / ");
-    }
+    applyText(item, card);
+    return item;
+  }
+
+  function rankItem(card) {
+    if (!card || typeof card !== "object" || Array.isArray(card)) fail("榜单里有无法识别的条目");
+    var id = positiveInt(card.video_id, "影片编号");
+    if (typeof card.title !== "string" || !card.title.trim()) fail("榜单条目缺少标题");
+    var episodes = Number(card.episode_count);
+    var item = {
+      id: id,
+      type: "detail",
+      title: card.title,
+      link: "hghub:video:" + id,
+      mediaType: episodes > 1 ? "tv" : "movie",
+    };
+    applyText(item, card);
     return item;
   }
 
@@ -216,14 +329,38 @@ var HGhubWidget = (function () {
     return { id: match[1], ep: match[2] || "" };
   }
 
+  function pageOf(params) {
+    return params.page == null || params.page === "" ? "1" : positiveInt(params.page, "页码");
+  }
+
+  async function loadItems(http, path) {
+    var data = await edge(http, "GET", path, null);
+    if (!data || typeof data !== "object" || !Array.isArray(data.items)) fail("列表响应缺少 items 数组");
+    return data.items;
+  }
+
   async function loadFeed(params, http) {
     params = params || {};
     rejectSecrets(params);
-    if (params.genreId || params.peopleId) fail("这个模块没有分类或人物列表");
-    var page = params.page == null || params.page === "" ? "1" : positiveInt(params.page, "页码");
-    var data = await edge(http, "GET", "/api/videos?page=" + page + "&size=" + PAGE_SIZE, null);
-    if (!data || typeof data !== "object" || !Array.isArray(data.items)) fail("列表响应缺少 items 数组");
-    return data.items.map(cardItem);
+    if (params.genreId || params.peopleId) fail("没有按标签或人物筛选的接口");
+    return (await loadItems(http, "/api/videos?page=" + pageOf(params) + "&size=" + PAGE_SIZE)).map(cardItem);
+  }
+
+  async function loadCategory(params, http) {
+    params = params || {};
+    rejectSecrets(params);
+    if (params.genreId || params.peopleId) fail("没有按标签或人物筛选的接口");
+    if (!CATEGORIES[params.cate]) fail("分类无效");
+    return (await loadItems(http, "/api/videos/category/" + params.cate + "?page=" + pageOf(params) + "&size=" + PAGE_SIZE)).map(cardItem);
+  }
+
+  async function loadRank(params, http) {
+    params = params || {};
+    rejectSecrets(params);
+    if (params.genreId || params.peopleId) fail("没有按标签或人物筛选的接口");
+    if (!RANKS[params.kind]) fail("榜单无效");
+    if (params.page != null && params.page !== "" && positiveInt(params.page, "页码") !== "1") return [];
+    return (await loadItems(http, "/api/ranks/" + params.kind)).map(rankItem);
   }
 
   async function loadDetail(link, http) {
@@ -247,9 +384,7 @@ var HGhubWidget = (function () {
     };
     if (typeof data.score === "number") item.rating = String(data.score);
     if (typeof data.created_at === "string" && data.created_at) item.releaseDate = data.created_at;
-    if (Array.isArray(data.tags) && data.tags.length) {
-      item.genreTitle = data.tags.filter(function (tag) { return typeof tag === "string" && tag; }).join(" / ");
-    }
+    if (tagsOf(data.tags).length) item.genreTitle = tagsOf(data.tags).join(" / ");
     return item;
   }
 
@@ -307,6 +442,8 @@ var HGhubWidget = (function () {
     EDGE: EDGE,
     base64Ascii: base64Ascii,
     loadFeed: loadFeed,
+    loadCategory: loadCategory,
+    loadRank: loadRank,
     loadDetail: loadDetail,
     loadResource: loadResource,
   };
@@ -314,6 +451,14 @@ var HGhubWidget = (function () {
 
 async function loadFeed(params) {
   return HGhubWidget.loadFeed(params, Widget.http);
+}
+
+async function loadCategory(params) {
+  return HGhubWidget.loadCategory(params, Widget.http);
+}
+
+async function loadRank(params) {
+  return HGhubWidget.loadRank(params, Widget.http);
 }
 
 async function loadDetail(link) {
