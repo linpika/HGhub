@@ -1,0 +1,5 @@
+# host 网络，且反代与本服务处在同一个网络命名空间时使用。
+# 不要新监听 80、443、8443。把 TRUST_PROXY 设成这个反代的精确地址，通常是 127.0.0.1。
+reverse_proxy 127.0.0.1:8787 {
+	header_up X-Forwarded-For {remote_host}
+}

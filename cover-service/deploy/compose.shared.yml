@@ -1,0 +1,11 @@
+services:
+  cover:
+    networks:
+      - shared
+    environment:
+      BIND: 0.0.0.0
+
+networks:
+  shared:
+    external: true
+    name: ${COVER_DOCKER_NETWORK:?COVER_DOCKER_NETWORK is required}

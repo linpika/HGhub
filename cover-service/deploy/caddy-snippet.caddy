@@ -1,0 +1,3 @@
+# 不要使用这一段。
+# 宿主机网络用 caddy-host.caddy，同一 Docker 网络用 caddy-shared.caddy。
+# 容器里的 127.0.0.1 不能当成宿主机地址。
