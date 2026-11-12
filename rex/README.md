@@ -2,7 +2,7 @@
 
 这是一个单文件 JavaScript 模块：`rex/hghub.widget.js`。它只复用本仓库客户端已经在用的游客读接口，提供最新列表、影片详情和起播时的播放地址。原来的 Tauri 应用没有改行为。
 
-模块固定请求 `https://huangguoai.com/api/edge/request`。它不登录、不保存口令、不携带 `Authorization`，也不在失败后改走 `huangguoai.ai` 或镜像。0.2.2 保留 0.2.1 的播放、排行榜、简介、标签和两个仍可用的分类。列表和详情的 `posterPath` 指向 `https://img-2c812d1bf79fee03e88d.linpika.com/v1/v/{编号}.png`。封面服务自己向游客接口取当前地址，只接受 `pic.drleao.cn`，再复用客户端已有的图片格式处理。模块文件里没有解密材料。
+模块固定请求 `https://huangguoai.com/api/edge/request`。它不登录、不保存口令、不携带 `Authorization`，也不在失败后改走 `huangguoai.ai` 或镜像。0.2.3 保留 0.2.1 的播放、排行榜、简介、标签和两个仍可用的分类。公开文件里的 `COVER_SIGNING_SECRET` 是空字符串，因此不返回 `posterPath`。只有不提交进仓库的私有副本填入与服务器相同的签名密钥后，列表和详情才会带最长约 4 分钟的 `https://img-2c812d1bf79fee03e88d.linpika.com/v1/v/{编号}.png?exp&sig`。
 
 许可证与仓库相同：[PolyForm Noncommercial 1.0.0](../LICENSE)。模块文件头带有许可证要求的 `Required Notice`。
 

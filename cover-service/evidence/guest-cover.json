@@ -1,0 +1,21 @@
+{
+  "checkedAt": "2026-11-12T08:17:39.009Z",
+  "id": 12,
+  "guestHttpStatus": 200,
+  "coverHttpStatus": 200,
+  "restoredSha256": "ab4e022dfbfdb286255b113ea868ded333e48bfcbb8afdcecadf6479f04a5e0a",
+  "format": "jpeg",
+  "width": 1086,
+  "height": 1448,
+  "bytes": 174813,
+  "independentDecoder": {
+    "command": "python3 -c 'from PIL import Image; image=Image.open(path); image.load(); print(image.format, image.size[0], image.size[1])'",
+    "output": "JPEG 1086 1448",
+    "status": 0
+  },
+  "signedServiceStatus": 200,
+  "signedServiceSha256": "ab4e022dfbfdb286255b113ea868ded333e48bfcbb8afdcecadf6479f04a5e0a",
+  "unsignedServiceStatus": 403,
+  "imageStored": false,
+  "offlineReproduction": false
+}

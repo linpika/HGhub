@@ -1,10 +1,10 @@
 WidgetMetadata = {
   id: "hghub.library",
   title: "HGhub",
-  description: "在播放器里浏览 HGhub 已使用的公开游客目录，并在起播时解析播放地址。海报使用个人封面服务的 HTTPS 地址。不含登录、收藏或评论。",
+  description: "在播放器里浏览 HGhub 已使用的公开游客目录，并在起播时解析播放地址。未填写私有签名时不返回海报。不含登录、收藏或评论。",
   author: "HGhub",
   site: "https://huangguoai.com",
-  version: "0.2.2",
+  version: "0.2.3",
   requiredVersion: "0.0.1",
   detailCacheDuration: 60,
   modules: [
@@ -107,6 +107,8 @@ var HGhubWidget = (function () {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
   var PAGE_SIZE = 20;
   var COVER_ORIGIN = "https://img-2c812d1bf79fee03e88d.linpika.com";
+  var COVER_SIGNING_SECRET = "";
+  var COVER_TTL_SEC = 240;
   var CATEGORIES = {
     "ai-duanju": true,
     "ai-manju": true,
@@ -251,6 +253,117 @@ var HGhubWidget = (function () {
     else if (typeof source.cate_name === "string" && source.cate_name) item.genreTitle = source.cate_name;
   }
 
+  function rotr(value, bits) {
+    return (value >>> bits) | (value << (32 - bits));
+  }
+
+  function sha256(bytes) {
+    var mathPow = Math.pow;
+    var maxWord = mathPow(2, 32);
+    var words = [];
+    var hash = [];
+    var k = [];
+    var primeCounter = 0;
+    var isComposite = {};
+    var candidate;
+    var i;
+    for (candidate = 2; primeCounter < 64; candidate += 1) {
+      if (!isComposite[candidate]) {
+        for (i = 0; i < 313; i += candidate) isComposite[i] = candidate;
+        hash[primeCounter] = (mathPow(candidate, 0.5) * maxWord) | 0;
+        k[primeCounter] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+        primeCounter += 1;
+      }
+    }
+    var ascii = "";
+    for (i = 0; i < bytes.length; i += 1) ascii += String.fromCharCode(bytes[i]);
+    var bitLength = ascii.length * 8;
+    ascii += "\x80";
+    while ((ascii.length % 64) - 56) ascii += "\x00";
+    for (i = 0; i < ascii.length; i += 1) {
+      var code = ascii.charCodeAt(i);
+      words[i >> 2] |= code << ((3 - i) % 4) * 8;
+    }
+    words[words.length] = ((bitLength / maxWord) | 0);
+    words[words.length] = bitLength;
+    for (var j = 0; j < words.length;) {
+      var w = words.slice(j, j += 16);
+      var oldHash = hash.slice(0);
+      for (i = 0; i < 64; i += 1) {
+        var w15 = w[i - 15];
+        var w2 = w[i - 2];
+        var a = hash[0];
+        var e = hash[4];
+        var temp1 = hash[7]
+          + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25))
+          + ((e & hash[5]) ^ ((~e) & hash[6]))
+          + k[i]
+          + (w[i] = (i < 16) ? w[i] : (
+            w[i - 16]
+            + (rotr(w15, 7) ^ rotr(w15, 18) ^ (w15 >>> 3))
+            + w[i - 7]
+            + (rotr(w2, 17) ^ rotr(w2, 19) ^ (w2 >>> 10))
+          ) | 0);
+        var temp2 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22))
+          + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+        hash = [(temp1 + temp2) | 0].concat(hash);
+        hash[4] = (hash[4] + temp1) | 0;
+        hash.pop();
+      }
+      for (i = 0; i < 8; i += 1) hash[i] = (hash[i] + oldHash[i]) | 0;
+    }
+    var out = [];
+    for (i = 0; i < 8; i += 1) {
+      for (var shift = 3; shift >= 0; shift -= 1) out.push((hash[i] >> (shift * 8)) & 255);
+    }
+    return out;
+  }
+
+  function asciiBytes(text) {
+    var bytes = [];
+    for (var i = 0; i < text.length; i += 1) bytes.push(text.charCodeAt(i) & 0xff);
+    return bytes;
+  }
+
+  function hmacSha256(secret, message) {
+    var key = asciiBytes(secret);
+    if (key.length > 64) key = sha256(key);
+    var outer = [], inner = [];
+    for (var i = 0; i < 64; i += 1) {
+      var byte = i < key.length ? key[i] : 0;
+      outer.push(byte ^ 0x5c);
+      inner.push(byte ^ 0x36);
+    }
+    return sha256(outer.concat(sha256(inner.concat(asciiBytes(message)))));
+  }
+
+  function base64Url(bytes) {
+    var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    var out = "";
+    for (var i = 0; i < bytes.length; i += 3) {
+      var b0 = bytes[i];
+      var b1 = i + 1 < bytes.length ? bytes[i + 1] : 0;
+      var b2 = i + 2 < bytes.length ? bytes[i + 2] : 0;
+      out += alphabet[b0 >> 2];
+      out += alphabet[((b0 & 3) << 4) | (b1 >> 4)];
+      if (i + 1 < bytes.length) out += alphabet[((b1 & 15) << 2) | (b2 >> 6)];
+      if (i + 2 < bytes.length) out += alphabet[b2 & 63];
+    }
+    return out;
+  }
+
+  function signedPoster(id) {
+    if (typeof COVER_SIGNING_SECRET !== "string" || COVER_SIGNING_SECRET.length < 16) return "";
+    var exp = String(Math.floor(Date.now() / 1000) + COVER_TTL_SEC);
+    var sig = base64Url(hmacSha256(COVER_SIGNING_SECRET, "GET\n/v1/v/" + id + ".png\n" + exp));
+    return COVER_ORIGIN + "/v1/v/" + id + ".png?exp=" + exp + "&sig=" + sig;
+  }
+
+  function attachPoster(item, id) {
+    var poster = signedPoster(id);
+    if (poster) item.posterPath = poster;
+  }
+
   function cardItem(card) {
     if (!card || typeof card !== "object" || Array.isArray(card)) fail("列表里有无法识别的条目");
     var id = positiveInt(card.id, "影片编号");
@@ -264,7 +377,7 @@ var HGhubWidget = (function () {
       mediaType: episodes > 1 ? "tv" : "movie",
     };
     applyText(item, card);
-    item.posterPath = COVER_ORIGIN + "/v1/v/" + id + ".png";
+    attachPoster(item, id);
     return item;
   }
 
@@ -281,7 +394,7 @@ var HGhubWidget = (function () {
       mediaType: episodes > 1 ? "tv" : "movie",
     };
     applyText(item, card);
-    item.posterPath = COVER_ORIGIN + "/v1/v/" + id + ".png";
+    attachPoster(item, id);
     return item;
   }
 
@@ -362,7 +475,7 @@ var HGhubWidget = (function () {
     if (typeof data.score === "number") item.rating = String(data.score);
     if (typeof data.created_at === "string" && data.created_at) item.releaseDate = data.created_at;
     if (tagsOf(data.tags).length) item.genreTitle = tagsOf(data.tags).join(" / ");
-    item.posterPath = COVER_ORIGIN + "/v1/v/" + id + ".png";
+    attachPoster(item, id);
     return item;
   }
 
@@ -424,6 +537,7 @@ var HGhubWidget = (function () {
     loadRank: loadRank,
     loadDetail: loadDetail,
     loadResource: loadResource,
+    signedPoster: signedPoster,
   };
 })();
 

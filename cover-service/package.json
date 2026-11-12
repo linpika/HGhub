@@ -2,6 +2,10 @@
   "name": "hghub-cover",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "node test.mjs",
+    "start": "node server.mjs"
+  },
   "dependencies": {
     "jpeg-js": "0.4.4"
   }

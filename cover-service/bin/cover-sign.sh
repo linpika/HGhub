@@ -1,9 +1,14 @@
 #!/bin/sh
-# 向 stdout 只写一行签名 URL。密钥来自环境变量，不回显。
+# 向 stdout 只写一行签名 URL。密钥来自环境变量，不回显。必须传入影片编号。
 set -eu
 cd "$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+id=${1:-}
+if ! printf '%s\n' "$id" | grep -Eq '^[1-9][0-9]{0,8}$'; then
+  echo "usage: cover-sign.sh <video id>" >&2
+  exit 1
+fi
 if [ -z "${COVER_SIGNING_SECRET:-}" ] || [ -z "${COVER_PUBLIC_ORIGIN:-}" ]; then
   echo "COVER_SIGNING_SECRET and COVER_PUBLIC_ORIGIN are required" >&2
   exit 1
 fi
-exec node server.mjs sign
+exec node server.mjs sign "$id"

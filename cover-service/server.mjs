@@ -9,6 +9,7 @@ import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { decodeCover, loadFormatMaterial } from "./decode.mjs";
 import { verifyJpeg } from "./image.mjs";
+import { mediaSourcePath } from "./paths.mjs";
 import { coverUrl, fetchCoverBytes, resolveCover } from "./source.mjs";
 
 const RATE_MAX_KEYS = 1024;
@@ -21,7 +22,7 @@ export function createCoverApp(options = {}) {
   const material = options.material;
   if (!material) throw new Error("media format material missing");
   const now = options.now || (() => Date.now());
-  const maxTtlSec = options.maxTtlSec || 120;
+  const maxTtlSec = options.maxTtlSec || 300;
   const cacheTtlMs = options.cacheTtlMs || 600_000;
   const cacheMax = options.cacheMax || 32;
   const rateMax = options.rateMax || 30;
@@ -81,11 +82,14 @@ export function createCoverApp(options = {}) {
   }
 
   function clientIp(peer, headers) {
-    const normalized = normalizeIp(peer) || "unknown";
+    const normalized = normalizeIp(peer);
+    if (!normalized) return "";
     if (!trustedProxies.has(normalized)) return normalized;
     const forwarded = headers["x-forwarded-for"];
-    if (typeof forwarded !== "string" || forwarded.includes(",")) return normalized;
-    return normalizeIp(forwarded.trim()) || normalized;
+    if (typeof forwarded !== "string" || forwarded.includes(",")) return "";
+    const client = normalizeIp(forwarded.trim());
+    if (!client || trustedProxies.has(client)) return "";
+    return client;
   }
 
   async function imageFor(id, t) {
@@ -111,24 +115,24 @@ export function createCoverApp(options = {}) {
   async function handle(req, peerIp) {
     const t = now();
     const headers = req.headers || {};
-    const ip = clientIp(peerIp || req.socket?.remoteAddress, headers);
-    if (!allow(ip, t)) return text(429, "rate limited");
     const raw = req.url || "";
     const cut = raw.indexOf("?");
     const rawPath = cut === -1 ? raw : raw.slice(0, cut);
     const rawQuery = cut === -1 ? "" : raw.slice(cut + 1);
     if (rawPath === "/healthz" && rawQuery === "") return text(200, "ok");
+    const peer = peerIp || req.socket?.remoteAddress || "127.0.0.1";
+    const ip = clientIp(peer, headers);
+    if (!ip) return text(403, "forbidden");
+    if (!allow(ip, t)) return text(429, "rate limited");
     if (rawPath.includes("%") || rawPath.includes("//") || rawPath.includes("..") || !rawPath.startsWith("/")) {
       return text(400, "bad path");
     }
     const match = /^\/v1\/v\/([1-9]\d{0,8})\.png$/.exec(rawPath);
     if (!match) return text(404, "not found");
     const id = match[1];
-    if (rawQuery !== "") {
-      const query = parseQuery(rawQuery);
-      if (!query) return text(400, "bad query");
-      if (!authorized(id, query.exp, query.sig, t)) return text(403, "forbidden");
-    }
+    const query = parseQuery(rawQuery);
+    if (query.error) return text(query.error, query.error === 400 ? "bad query" : "forbidden");
+    if (!authorized(id, query.exp, query.sig, t)) return text(403, "forbidden");
     return imageFor(id, t);
   }
 
@@ -150,16 +154,17 @@ export function createCoverApp(options = {}) {
 }
 
 function parseQuery(raw) {
-  if (!raw) return null;
+  if (!raw) return { error: 403 };
   const found = new Map();
   for (const part of raw.split("&")) {
-    if (!part || part.includes("%") || !/^(exp|sig)=[A-Za-z0-9_-]+$/.test(part)) return null;
+    if (!part) return { error: 403 };
+    if (part.includes("%") || !/^(exp|sig)=[A-Za-z0-9_-]+$/.test(part)) return { error: 400 };
     const eq = part.indexOf("=");
     const key = part.slice(0, eq);
-    if (found.has(key)) return null;
+    if (found.has(key)) return { error: 400 };
     found.set(key, part.slice(eq + 1));
   }
-  if (found.size !== 2) return null;
+  if (found.size !== 2) return { error: 403 };
   return { exp: found.get("exp"), sig: found.get("sig") };
 }
 
@@ -204,15 +209,25 @@ export function listen(app, port = 0, host = "127.0.0.1") {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const secret = readSecret();
-  const material = loadFormatMaterial(process.env.MEDIA_SOURCE || new URL("../src-tauri/src/media.rs", import.meta.url));
+  const material = loadFormatMaterial(mediaSourcePath());
   const trusted = (process.env.TRUST_PROXY || "").split(",").map((item) => item.trim()).filter(Boolean);
+  const bind = process.env.BIND || "127.0.0.1";
+  if ((bind === "0.0.0.0" || bind === "::") && trusted.length !== 1) {
+    console.error("TRUST_PROXY must be one exact address when BIND is open");
+    process.exit(1);
+  }
   const app = createCoverApp({ secret, material, trustedProxies: trusted });
   if (process.argv[2] === "sign") {
-    process.stdout.write(`${app.sign(process.argv[3] || "1", 60, process.env.COVER_PUBLIC_ORIGIN)}\n`);
+    const id = process.argv[3] || "";
+    if (!/^[1-9]\d{0,8}$/.test(id)) {
+      console.error("video id is required");
+      process.exit(1);
+    }
+    process.stdout.write(`${app.sign(id, 240, process.env.COVER_PUBLIC_ORIGIN)}\n`);
   } else {
     const port = Number(process.env.PORT || 8787);
-    listen(app, port, process.env.BIND || "127.0.0.1").then((server) => {
-      console.log(`cover service listening on ${process.env.BIND || "127.0.0.1"}:${server.address().port}`);
+    listen(app, port, bind).then((server) => {
+      console.log(`cover service listening on ${bind}:${server.address().port}`);
     });
   }
 }

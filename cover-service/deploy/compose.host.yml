@@ -1,0 +1,5 @@
+services:
+  cover:
+    network_mode: host
+    environment:
+      BIND: 127.0.0.1

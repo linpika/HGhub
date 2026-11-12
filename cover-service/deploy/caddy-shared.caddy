@@ -1,0 +1,6 @@
+# 反代容器和封面容器已经在同一个 Docker 网络时使用。
+# 服务名是 hghub-cover。不要把 127.0.0.1:8787 当成宿主机地址。
+# TRUST_PROXY 必须是该网络里反代容器的精确地址，不能写网段。
+reverse_proxy hghub-cover:8787 {
+	header_up X-Forwarded-For {remote_host}
+}

@@ -1,13 +1,13 @@
 // 合成 fixture。不访问 huangguoai.com，也不把结果当成播放成功。
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createHmac } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
 
 const widgetPath = resolve(dirname(fileURLToPath(import.meta.url)), "hghub.widget.js");
 const source = readFileSync(widgetPath, "utf8");
-const imageKey = "f5d965df75336270";
 const cases = [];
 
 function test(name, fn) {
@@ -17,10 +17,10 @@ function test(name, fn) {
   ));
 }
 
-function loadWidget(http) {
+function loadWidget(http, code = source) {
   const sandbox = { Widget: { http }, console };
   vm.createContext(sandbox);
-  vm.runInContext(source, sandbox, { filename: widgetPath });
+  vm.runInContext(code, sandbox, { filename: widgetPath });
   return sandbox;
 }
 
@@ -80,10 +80,19 @@ function scriptedHttp(script) {
 }
 
 test("源码不嵌入封面密钥、令牌或第二线路", () => {
-  assert.equal(source.includes(imageKey), false);
+  const mediaCandidates = [
+    resolve(dirname(widgetPath), "../.build/media.rs"),
+    resolve(dirname(widgetPath), "../src-tauri/src/media.rs"),
+  ];
+  const mediaFile = mediaCandidates.find((item) => existsSync(item));
+  if (!mediaFile) throw new Error("media format material missing");
+  const material = /const IMG_KEY: &\[u8\] = b"([^"]+)";/.exec(readFileSync(mediaFile, "utf8"));
+  if (!material) throw new Error("media format material missing");
+  if (source.includes(material[1])) throw new Error("widget contains format material");
   assert.equal(source.includes("Authorization"), false);
   assert.equal(source.includes("huangguoai.ai"), false);
   assert.equal(source.includes("auth_key"), false);
+  assert.equal(source.includes('var COVER_SIGNING_SECRET = "";'), true);
   assert.match(source, /Required Notice: Copyright \(c\) 2026 HGhub contributors/);
 });
 
@@ -105,7 +114,7 @@ test("导入声明与官方公开模块一致，且只有一份完整元数据",
   assert.equal(source.includes("/* WidgetMetadata"), false);
   const metadata = executableMetadata(source);
   assert.equal(metadata.id, "hghub.library");
-  assert.equal(metadata.version, "0.2.2");
+  assert.equal(metadata.version, "0.2.3");
   assert.equal(metadata.requiredVersion, "0.0.1");
   assert.deepEqual(metadata.modules.map((item) => item.id), [
     "feed", "ai-duanju", "ai-manju",
@@ -128,7 +137,7 @@ test("空对象的 base64 与客户端 STANDARD 编码一致", () => {
   assert.equal(Buffer.from("e30=", "base64").toString(), "{}");
 });
 
-test("列表到详情再到播放地址，海报指向个人封面服务而不是密文地址", async () => {
+test("列表到详情再到播放地址，公开模块未配置签名时不返回海报", async () => {
   const playUrl = "https://cdn.example/videos/sample.m3u8";
   const http = scriptedHttp([
     {
@@ -169,7 +178,7 @@ test("列表到详情再到播放地址，海报指向个人封面服务而不�
   assert.equal(list[0].type, "detail");
   assert.equal(list[0].videoUrl, undefined);
   assert.equal(list[0].coverUrl, undefined);
-  assert.equal(list[0].posterPath, "https://img-2c812d1bf79fee03e88d.linpika.com/v1/v/501.png");
+  assert.equal(list[0].posterPath, undefined);
   assert.equal(list[0].mediaType, "tv");
 
   const detail = await sandbox.loadDetail(list[0].link);
@@ -177,7 +186,7 @@ test("列表到详情再到播放地址，海报指向个人封面服务而不�
   assert.equal(detail.episodeItems[1].link, "hghub:video:501:2");
   assert.equal(detail.episodeItems[1].videoUrl, undefined);
   assert.equal(detail.coverUrl, undefined);
-  assert.equal(detail.posterPath, "https://img-2c812d1bf79fee03e88d.linpika.com/v1/v/501.png");
+  assert.equal(detail.posterPath, undefined);
 
   const resources = await sandbox.loadResource({ link: detail.episodeItems[1].link, episode: 2 });
   assert.equal(resources.length, 1);
@@ -274,7 +283,7 @@ test("不兼容响应、重定向、缺选集和凭据都失败", async () => {
   assert.equal(http.calls.length, 0);
 });
 
-test("分类、排行榜和最新都能进同一条详情与播放链路，海报指向个人封面服务", async () => {
+test("分类、排行榜和最新都能进同一条详情与播放链路，公开模块不带无签名海报", async () => {
   const playUrl = "https://cdn.example/videos/sample.m3u8";
   const card = {
     ...feedData.items[0],
@@ -304,8 +313,7 @@ test("分类、排行榜和最新都能进同一条详情与播放链路，海�
     assert.equal(list[0].description, listCall.expectDescription);
     assert.equal(list[0].genreTitle, listCall.expectGenre);
     assert.equal(list[0].coverUrl, undefined);
-    assert.equal(list[0].posterPath, "https://img-2c812d1bf79fee03e88d.linpika.com/v1/v/501.png");
-    assert.equal(list[0].posterPath.includes("pic.example"), false);
+    assert.equal(list[0].posterPath, undefined);
     assert.equal(list[0].backdropPath, undefined);
     const detail = await sandbox.loadDetail(list[0].link);
     assert.equal(detail.episodeItems.length, 2);
@@ -370,6 +378,44 @@ test("详情没有选集时不编造选集或播放地址", async () => {
   assert.equal(detail.videoUrl, undefined);
   assert.equal(http.calls.length, 1);
   assert.equal(http.calls[0].body.path, "/api/videos/501");
+});
+
+test("私有副本的签名能通过封面服务，公开副本没有海报地址", async () => {
+  const openHttp = scriptedHttp([{ response: jsonResponse(envelope(feedData)) }]);
+  const openList = await loadWidget(openHttp).loadFeed({ page: "1" });
+  assert.equal(openList[0].posterPath, undefined);
+  const secret = "test-signing-secret-16";
+  assert.equal(source.includes(secret), false);
+  const configured = source.replace('var COVER_SIGNING_SECRET = "";', `var COVER_SIGNING_SECRET = "${secret}";`);
+  const privateHttp = scriptedHttp([{ response: jsonResponse(envelope(feedData)) }]);
+  const list = await loadWidget(privateHttp, configured).loadFeed({ page: "1" });
+  const poster = new URL(list[0].posterPath);
+  assert.equal(poster.origin, "https://img-2c812d1bf79fee03e88d.linpika.com");
+  assert.equal(poster.pathname, "/v1/v/501.png");
+  const exp = poster.searchParams.get("exp");
+  const sig = poster.searchParams.get("sig");
+  const expected = createHmac("sha256", secret).update(`GET\n/v1/v/501.png\n${exp}`).digest("base64url");
+  assert.equal(sig, expected);
+  const serverPath = [
+    resolve(dirname(widgetPath), "../server.mjs"),
+    resolve(dirname(widgetPath), "../cover-service/server.mjs"),
+  ].find((item) => existsSync(item));
+  const mediaPath = [
+    resolve(dirname(widgetPath), "../.build/media.rs"),
+    resolve(dirname(widgetPath), "../src-tauri/src/media.rs"),
+  ].find((item) => existsSync(item));
+  const { createCoverApp } = await import(pathToFileURL(serverPath).href);
+  const { loadFormatMaterial } = await import(pathToFileURL(resolve(dirname(serverPath), "decode.mjs")).href);
+  const app = createCoverApp({
+    secret,
+    material: loadFormatMaterial(mediaPath),
+    resolveCover: async () => "https://pic.drleao.cn/offline.jpg",
+    fetchCover: async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+  });
+  const response = await app.handle({ url: `${poster.pathname}${poster.search}` });
+  assert.equal(response.status === 200 || response.status === 502, true);
+  assert.notEqual(response.status, 403);
+  assert.equal((await app.handle({ url: poster.pathname })).status, 403);
 });
 
 const results = await Promise.all(cases);
