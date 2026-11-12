@@ -87,6 +87,37 @@ test("源码不嵌入封面密钥、令牌或第二线路", () => {
   assert.match(source, /Required Notice: Copyright \(c\) 2026 HGhub contributors/);
 });
 
+function executableMetadata(code) {
+  const rewritten = code.replace(/\b(?:export\s+)?(?:const|let|var)\s+WidgetMetadata\b/g, "WidgetMetadata");
+  const sandbox = { WidgetMetadata: null };
+  const func = new Function(
+    "sandbox",
+    "Widget",
+    `let WidgetMetadata;\n${rewritten}\nsandbox.WidgetMetadata = WidgetMetadata;`,
+  );
+  func(sandbox, { http: { post() { throw new Error("导入检查不应发请求"); } } });
+  return sandbox.WidgetMetadata;
+}
+
+test("导入声明与官方公开模块一致，且只有一份完整元数据", () => {
+  assert.match(source, /^WidgetMetadata = \{/);
+  assert.equal(source.split("WidgetMetadata").length - 1, 1);
+  assert.equal(source.includes("/* WidgetMetadata"), false);
+  const metadata = executableMetadata(source);
+  assert.equal(metadata.id, "hghub.library");
+  assert.equal(metadata.version, "0.1.1");
+  assert.equal(metadata.requiredVersion, "0.0.1");
+  assert.equal(metadata.modules.length, 2);
+  assert.deepEqual(metadata.modules.map((item) => item.functionName), ["loadFeed", "loadResource"]);
+  assert.equal(metadata.modules[0].type, undefined);
+  assert.equal(metadata.modules[1].id, "loadResource");
+  assert.equal(metadata.modules[1].type, "stream");
+  const sandbox = loadWidget({ async post() { throw new Error("不应发请求"); } });
+  for (const name of ["loadFeed", "loadDetail", "loadResource"]) {
+    assert.equal(typeof sandbox[name], "function");
+  }
+});
+
 test("空对象的 base64 与客户端 STANDARD 编码一致", () => {
   const sandbox = loadWidget({ async post() { throw new Error("不应发请求"); } });
   assert.equal(sandbox.HGhubWidget.base64Ascii("{}"), "e30=");

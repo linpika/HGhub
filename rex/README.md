@@ -24,31 +24,25 @@ node rex/probe-public.mjs
 
 ## 安装
 
-本环境没有 Rex 真机，下面只写已经在公开文档里出现过的导入方式。
+2026-11-12 检查过当时的源码地址：HTTP 200，`Content-Type: text/plain; charset=utf-8`，正文就是这份脚本。已知能用链接安装的 `rex-home.js` 也是 GitHub raw 的 `text/plain`，所以失败不是 404，也不是这个 Content-Type 单独造成的。
 
-`rex/hghub.widget.js` 是要安装的模块文件。社区仓库 [MakkaPakka518/Rex-Widgets-Hub](https://github.com/MakkaPakka518/Rex-Widgets-Hub) 的 README 写明：
+公开可下载的官方模块 `https://assets.rexnow.tv/scripts/rex-tmdb.js` 和 `https://assets.rexnow.tv/scripts/bangumi.js` 都以 `WidgetMetadata = {` 开头，并带 `requiredVersion: "0.0.1"` 和 `modules`。本文件先前在完整声明前面又放了一段只有编号和标题的 `/* WidgetMetadata { ... } */`。按第一段声明取值的解析器会得到一份没有 `modules` 的元数据。0.1.1 改成与上述官方脚本相同的单份声明。这还没有在真机上复测。
 
-- Rex 模块是 JavaScript，可用文件头的 `WidgetMetadata` 注释或 `WidgetMetadata =` 声明 `id`、`title`、`version`、`author`。
-- 客户端导入链接形如 `rex://widget?url=<模块源码的 HTTPS 地址>`。
-- 合集订阅是另一份 JSON，路径以 `.rex` 结尾；其中每个模块仍通过 `url` 指向 JS 源码。
+已在 Rex 使用记录里出现的安装方式有两种，见 [kenxtbecdi7690/rex-home 新手教学](https://github.com/kenxtbecdi7690/rex-home/blob/main/新手教学.md) 和 [模块工具教学](https://github.com/kenxtbecdi7690/rex-home/blob/main/模块工具教学.md)：
 
-本分支文件推送后，对应的源码地址是：
+1. 用模块页的链接安装，地址是：
 
 ```text
 https://raw.githubusercontent.com/linpika/HGhub/cursor/rex-hghub-module-99df/rex/hghub.widget.js
 ```
 
-在系统能把 `rex://` 交给 Rex 时，可打开：
+2. 模块页「＋」→ 从文件导入 `rex/hghub.widget.js`。
 
-```text
-rex://widget?url=https%3A%2F%2Fraw.githubusercontent.com%2Flinpika%2FHGhub%2Fcursor%2Frex-hghub-module-99df%2Frex%2Fhghub.widget.js
-```
-
-没有查到 Rex 应用官方的「从本地文件安装」菜单说明，所以这里不写设置项名称。真机是否接受上述链接、是否执行 `loadFeed` / `loadDetail` / `loadResource`，都还没验证。
+`rex://widget?url=` 只写在第三方仓库 [Rex-Widgets-Hub](https://github.com/MakkaPakka518/Rex-Widgets-Hub) 的 README 里。按真实备份整理的 [导入导出规则](https://github.com/kenxtbecdi7690/rex-home/blob/main/导入导出规则.md) 把合集链接格式标为未确认，所以不要把这条自定义协议当成已经验证的安装方法。
 
 ## 真机上看一条影片
 
-1. 用上面的链接导入模块。导入失败就停，不要改模块去猜别的入口。
+1. 用上面的 https 链接，或模块页「＋」从文件导入 0.1.1。导入失败就停，并记下 Rex 版本、用的是链接还是文件，以及完整失败提示。
 2. 打开模块里的「最新」，确认能看到一页条目标题。封面预期为空，因为模块故意不返回加密封面。
 3. 点开一条，确认详情里有选集。没有选集就停。
 4. 点一集。播放器应调用 `loadResource`，向固定线路取播放地址。能开始播放才算这条链路在真机上通过。
@@ -71,7 +65,7 @@ rex://widget?url=https%3A%2F%2Fraw.githubusercontent.com%2Flinpika%2FHGhub%2Fcur
 | 返回 `{ name, url, description?, customHeaders?, playerType? }` | README 有 | `stream.ts` 还有同级字段 `headers` | 两个头字段写入同一组 Referer 和 User-Agent。应用读哪一个尚未证实 |
 | `Widget.http.post(url, body, options)`，读 `response.data` | README 有 | 测试适配器返回 `{ data, statusCode }` | 两者都读取。缺少 `data` 或 HTTP 状态码就失败 |
 | 条目 `type` | README 列出 url、douban、imdb、tmdb，后文另有 forward | 联合类型多了 `detail` | 使用 `detail`。Forward 正文没有这个类型的行为说明，真机是否用它打开 `loadDetail` 尚未证实 |
-| 导入 | 文档讲的是 Forward，不是 Rex | 官方应用手册未找到 | 只采用 Rex-Widgets-Hub README 里的 `rex://widget?url=` |
+| 导入 | 文档讲的是 Forward，不是 Rex | 官方脚本以 `WidgetMetadata =` 开头。新手教学用 https raw 链接安装；模块工具教学写模块页「＋」从文件导入。`rex://widget?url=` 只有第三方面板文档 | 文件以单份 `WidgetMetadata =` 开头。安装说明改为 https 链接或从文件导入 |
 
 不能从这些页面推出「Forward 模块可以直接安装到 Rex」。InchStudio 的公开仓库里没有 Rex 应用仓库。`@rexnow/libs` 的作者仓库是 `baranwang/rex-widget-libs`，许可证是 MIT，它是社区类型库，不是 Rex 应用源码。
 

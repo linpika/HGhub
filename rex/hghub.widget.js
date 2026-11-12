@@ -1,28 +1,11 @@
-/*
- * HGhub Rex 模块。只读游客目录：列表、详情、播放地址。
- *
- * Required Notice: Copyright (c) 2026 HGhub contributors (https://github.com/Minireel/HGhub)
- * 许可证：PolyForm Noncommercial 1.0.0
- * https://polyformproject.org/licenses/noncommercial/1.0.0
- *
- * 本文件是仓库内的新作品，沿用同一许可证。它不包含登录凭据、会话令牌或封面解密密钥。
- * 封面在原客户端里由本地代码解密；这里不返回封面地址，避免把密文当成可显示图片。
- */
-
-/* WidgetMetadata {
-  "id": "hghub.library",
-  "title": "HGhub",
-  "version": "0.1.0",
-  "author": "HGhub"
-} */
-
-var WidgetMetadata = {
+WidgetMetadata = {
   id: "hghub.library",
   title: "HGhub",
   description: "在播放器里浏览 HGhub 已使用的公开游客目录，并在起播时解析播放地址。不含登录、收藏或评论。",
   author: "HGhub",
   site: "https://huangguoai.com",
-  version: "0.1.0",
+  version: "0.1.1",
+  requiredVersion: "0.0.1",
   detailCacheDuration: 60,
   modules: [
     {
@@ -54,6 +37,11 @@ var WidgetMetadata = {
     },
   ],
 };
+
+// Required Notice: Copyright (c) 2026 HGhub contributors (https://github.com/Minireel/HGhub)
+// License: PolyForm Noncommercial 1.0.0
+// https://polyformproject.org/licenses/noncommercial/1.0.0
+// 同一仓库内的非商业派生文件。不包含登录凭据或封面解密密钥。
 
 var HGhubWidget = (function () {
   var ORIGIN = "https://huangguoai.com";
